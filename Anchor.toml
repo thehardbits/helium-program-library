@@ -2,6 +2,9 @@
 seeds = true
 docs = false
 
+[toolchain]
+anchor_version = "0.28.0-96cde854eeb0707e9ca6d3619308dd2769156bb2"
+
 [programs.localnet]
 lazy_distributor = "1azyuavdMyvsivtNxPoz6SucD18eDHeXzFCUPq5XU7w"
 helium_sub_daos = "hdaoVTCqhfHHo75XdAMxBKdUqvq1i5bF23sisBqVgGR"
