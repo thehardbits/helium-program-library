@@ -1,6 +1,6 @@
 {
   "name": "@helium/currency-utils",
-  "version": "0.7.14",
+  "version": "0.8.6",
   "description": "Currency utilities",
   "homepage": "https://github.com/helium/helium-program-library#readme",
   "publishConfig": {
@@ -28,7 +28,6 @@
     "prebuild": "npm run clean && npm run package"
   },
   "dependencies": {
-    "@pythnetwork/client": "^2.12.0",
     "@solana/spl-token": "^0.3.8",
     "@solana/web3.js": "^1.78.8"
   },

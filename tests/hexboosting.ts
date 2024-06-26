@@ -4,10 +4,11 @@ import { init as initDataCredits } from "@helium/data-credits-sdk";
 import { init as initHeliumSubDaos } from "@helium/helium-sub-daos-sdk";
 import { Hexboosting } from "@helium/idls/lib/types/hexboosting";
 import { MobileEntityManager } from "@helium/idls/lib/types/mobile_entity_manager";
-import { PriceOracle } from "@helium/idls/lib/types/price_oracle";
-import { init as initPo } from "@helium/price-oracle-sdk";
 import { toBN } from "@helium/spl-utils";
-import { parsePriceData } from "@pythnetwork/client";
+import {
+  PythSolanaReceiverProgram,
+  pythSolanaReceiverIdl,
+} from "@pythnetwork/pyth-solana-receiver";
 import {
   SPL_ACCOUNT_COMPRESSION_PROGRAM_ID,
   getConcurrentMerkleTreeAccountSize,
@@ -41,7 +42,6 @@ import {
 } from "./utils/fixtures";
 import { random } from "./utils/string";
 
-
 describe("hexboosting", () => {
   anchor.setProvider(anchor.AnchorProvider.local("http://127.0.0.1:8899"));
 
@@ -51,13 +51,13 @@ describe("hexboosting", () => {
   let periodLength = 60 * 60 * 24 * 30; // roughly one month
 
   const priceOracle: PublicKey = new PublicKey(
-    "JBaTytFv1CmGNkyNiLu16jFMXNZ49BGfy4bYAYZdkxg5"
+    "DQ4C1tzvu28cwo1roN1Wm6TW35sfJEjLh517k3ZeWevx"
   );
 
   let hemProgram: Program<HeliumEntityManager>;
   let hsdProgram: Program<HeliumSubDaos>;
   let dcProgram: Program<DataCredits>;
-  let poProgram: Program<PriceOracle>;
+  let pythProgram: Program<PythSolanaReceiverProgram>;
   let memProgram: Program<MobileEntityManager>;
   let carrier: PublicKey;
   let merkle: Keypair;
@@ -70,10 +70,9 @@ describe("hexboosting", () => {
       anchor.workspace.Hexboosting.programId,
       anchor.workspace.Hexboosting.idl
     );
-    poProgram = await initPo(
-      provider,
-      anchor.workspace.PriceOracle.programId,
-      anchor.workspace.PriceOracle.idl
+    pythProgram = new Program(
+      pythSolanaReceiverIdl,
+      new PublicKey("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ")
     );
     dcProgram = await initDataCredits(
       provider,
@@ -205,10 +204,15 @@ describe("hexboosting", () => {
           rentReclaimAuthority: me,
         })
         .rpcAndKeys({ skipPreflight: true });
-      const pythData = (await provider.connection.getAccountInfo(priceOracle))!
-        .data;
-      const price = parsePriceData(pythData);
-      pythPrice = price.emaPrice.value - price.emaConfidence!.value * 2;
+      const price = await pythProgram.account.priceUpdateV2.fetch(
+        new PublicKey("DQ4C1tzvu28cwo1roN1Wm6TW35sfJEjLh517k3ZeWevx")
+      );
+      pythPrice =
+        price.priceMessage.emaPrice
+          .sub(price.priceMessage.emaConf.mul(new BN(2)))
+          .toNumber() *
+        10 ** price.priceMessage.exponent;
+      console.log(pythPrice);
     });
 
     it("allows updating boost config", async () => {
@@ -252,7 +256,6 @@ describe("hexboosting", () => {
         .boostV0({
           location: new BN(1),
           version: 0,
-          deviceType: { wifiIndoor: {} },
           amounts: [
             {
               period: 0,
@@ -301,9 +304,8 @@ describe("hexboosting", () => {
         expected
       );
 
-      const hex = await program.account.boostedHexV1.fetch(boostedHex!);
+      const hex = await program.account.boostedHexV0.fetch(boostedHex!);
 
-      expect(Object.keys(hex.deviceType)[0]).to.eq("wifiIndoor");
       expect(hex.location.toNumber()).to.eq(1);
       expect(hex.startTs.toNumber()).to.eq(0);
       expect(hex.boostsByPeriod.toJSON().data).to.deep.eq([1, 1, 1, 1, 1, 1]);
@@ -315,7 +317,6 @@ describe("hexboosting", () => {
           .boostV0({
             location: new BN(1),
             version: 0,
-            deviceType: { wifiIndoor: {} },
             amounts: [
               {
                 period: 0,
@@ -363,7 +364,6 @@ describe("hexboosting", () => {
           .boostV0({
             location: new BN(1),
             version: 1,
-            deviceType: { wifiIndoor: {} },
             amounts: [
               {
                 period: 2,
@@ -395,7 +395,7 @@ describe("hexboosting", () => {
           Number(expected)
         );
 
-        const hex = await program.account.boostedHexV1.fetch(boostedHex!);
+        const hex = await program.account.boostedHexV0.fetch(boostedHex!);
 
         expect(hex.boostsByPeriod.toJSON().data).to.deep.eq([
           1, 1, 2, 1, 1, 1, 2,
@@ -403,11 +403,7 @@ describe("hexboosting", () => {
       });
 
       it("allows starting a boost", async () => {
-        const boostedHex = boostedHexKey(
-          boostConfigKey(mint)[0],
-          { wifiIndoor: {} },
-          new BN(1)
-        )[0];
+        const boostedHex = boostedHexKey(boostConfigKey(mint)[0], new BN(1))[0];
         await program.methods
           .startBoostV0({
             startTs: new BN(1),
@@ -416,7 +412,7 @@ describe("hexboosting", () => {
             boostedHex,
           })
           .rpc({ skipPreflight: true });
-        const acc = await program.account.boostedHexV1.fetch(boostedHex!);
+        const acc = await program.account.boostedHexV0.fetch(boostedHex!);
         expect(acc.startTs.toNumber()).to.not.eq(0);
       });
 
@@ -429,7 +425,6 @@ describe("hexboosting", () => {
         beforeEach(async () => {
           const boostedHex = boostedHexKey(
             boostConfigKey(mint)[0],
-            { wifiIndoor: {} },
             new BN(1)
           )[0];
           await program.methods
@@ -445,7 +440,6 @@ describe("hexboosting", () => {
         it("allows closing the boost when it's done", async () => {
           const boostedHex = boostedHexKey(
             boostConfigKey(mint)[0],
-            { wifiIndoor: {} },
             new BN(1)
           )[0];
           // Wait 7 seconds so it is fully expired
